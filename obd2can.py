@@ -69,7 +69,7 @@ class OBD2CAN:
 
         self.can = CAN(0, tx=tx, rx=rx, mode=mode, bitrate=bitrate, extframe=extframe)
         
-        # currently the CAN hardware receive filters won't work as expected, so we're go by software (self._resp_id[0] > can_id > self._resp_id[1])
+        # the CAN hardware filters won't work as expected at the time, so we go by software (if self._resp_id[0] > can_id > self._resp_id[1])
         # can.set_filters(bank=0, mode=CAN.FILTER_RAW_SINGLE, params=[resp_id, filter_mask], extframe=is_extended_id)
 
         if debug: print('\n=============================\n')
