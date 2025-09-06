@@ -3,8 +3,10 @@ A micropython class to retrieve car's PID live parameter using ESP32 native TWAI
 Made possible thanks to Viktor's [micropython-esp32-twai](https://github.com/straga/micropython-esp32-twai).
 
 ## How to
-> Simply connect CAN tranceiver module like `TJA1050`, `SN65HVD230`, or `MCP2551` to the `can_rx` and `can_tx` pins of ESP32.\
-> Then connect the module's `CAN H` and `CAN L` pins to the car's OBD2 port, usually pin 6 and 14 respectively with the common ground as well.
+Simply connect CAN tranceiver module like `TJA1050`, `SN65HVD230`, or `MCP2551` to the `can_rx` and `can_tx` pins of ESP32.\
+Then connect the module's `CAN H` and `CAN L` pins to the car's OBD2 port, usually pin 6 and 14 respectively with the common ground as well.
+
+![https://forum.arduino.cc/t/esp32-waveshare-sn65hvd230-can/1089185](https://europe1.discourse-cdn.com/arduino/original/4X/4/8/b/48b291219c72f8507d8c67aba5713d956c8bf9bf.jpeg)
 
 ### Pseudo ELM237 serial `request` for RPM `0x0C`
 ```py
@@ -77,5 +79,14 @@ CAN: [DEBUG] REQUEST  | 02 01 05 CC CC CC CC CC
 CAN: [DEBUG] RESPONSE | 03 41 05 9F AA AA AA AA
 COOLANT_TEMP: 119 °C
 ```
-## To-do next
-- Multiframe request for getting VIN and DTC fault code
+## Miscs
+### To-do next
+- [x] Retieve all supported PIDs: `pid_code 0x00, 0x20, 0x40, ...`
+- [ ] Multiframe request for getting VIN and DTC fault code
+
+### Further readings
+- [OBD2 Explained](https://www.csselectronics.com/pages/obd2-explained-simple-intro)
+
+### Disclaimer
+> [!CAUTION]
+> Working with a vehicle’s CAN bus involves risks, including possible damage to the vehicle’s electronics and safety systems. Proceed entirely at your own risk!
