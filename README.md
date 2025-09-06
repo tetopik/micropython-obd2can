@@ -85,6 +85,8 @@ COOLANT_TEMP: 119 °C
 - [ ] Multiframe request for getting VIN and DTC fault code
 
 ### Further readings
+- [ESP32 Two-Wire Automotive Interface (TWAI)](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/peripherals/twai.html)
+- [Wiki OBD-II PIDs](https://en.wikipedia.org/wiki/OBD-II_PIDs)
 - [OBD2 Explained](https://www.csselectronics.com/pages/obd2-explained-simple-intro)
 
 ### Disclaimer
