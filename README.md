@@ -1,40 +1,22 @@
-𝐌𝐢𝐜𝐫𝐨𝐩𝐲𝐭𝐡𝐨𝐧 𝐄𝐒𝐏𝟑𝟐 𝐮𝐬𝐢𝐧𝐠 𝐧𝐚𝐭𝐢𝐯𝐞 𝐓𝐖𝐀𝐈 𝐩𝐞𝐫𝐢𝐩𝐡𝐞𝐫𝐚𝐥 𝐭𝐨 𝐫𝐞𝐚𝐝 𝐎𝐁𝐃𝟐 𝐏𝐈𝐃𝐬 𝐥𝐢𝐤𝐞 𝐄𝐋𝐌𝟐𝟑𝟕 𝐝𝐞𝐯𝐢𝐜𝐞.
-=====================================================
-
+# micropython-obd2can
+A micropython class to retrieve car's PID live parameter using ESP32 native TWAI/CAN peripheral.\
 Made possible thanks to Viktor's [micropython-esp32-twai](https://github.com/straga/micropython-esp32-twai).
 
----
-𝑯𝒐𝒘 𝒕𝒐:
----
-Simply connect CAN tranceiver module like `TJA1050`, `SN65HVD230`, or `MCP2551` to the `can_rx` and `can_tx` pins of an ESP32. And then connect `CAN H` and `CAN L` of the module to the car's OBD2 port, usually pin 6 and 14 respectively with the common ground as well.
+## How to
+> Simply connect CAN tranceiver module like `TJA1050`, `SN65HVD230`, or `MCP2551` to the `can_rx` and `can_tx` pins of ESP32.\
+> Then connect the module's `CAN H` and `CAN L` pins to the car's OBD2 port, usually pin 6 and 14 respectively with the common ground as well.
 
-
-To make a pseudo ELM237 serial request, simply call:
--
+### Pseudo ELM237 serial `request` for RPM `0x0C`
 ```py
-obd2.request(0x01, 0x0C)
+obd.request(0x01, 0x0C) # service_id, pid_code
 ```
-`0x01` = SERVICE ID
-
-`0x0C` = PID CODE for RPM
-
-
-The return:
--
+### `response`
 ```py
-memoryview(0x41, 0x0C, 0x0D, 0x98)
+memoryview(0x41, 0x0C, 0x0D, 0x98) # service_id + 0x40, pid_code, 2-MSB data for RPM
 ```
-`0x01` = SERVICE ID for valid response (`request + 0x40`)
 
-`0x0C` = PID CODE for RPM
-
-`0x0D, 0x98` = 2 bytes MSB value for RPM / 4
-
----
-𝑬𝒙𝒂𝒎𝒑𝒍𝒆 𝒄𝒐𝒅𝒆:
----
-
-> Example `main.py` code:
+## Example code
+### `main.py`
 ```py
 from obd2can import OBD2CAN, supported_pids
 
@@ -52,8 +34,7 @@ except:
 finally:
     obd.can.deinit()
 ```
-
-> Expected output:
+### `console`
 ```
 CAN: TIMING
 CAN: timing brp=0
@@ -96,9 +77,5 @@ CAN: [DEBUG] REQUEST  | 02 01 05 CC CC CC CC CC
 CAN: [DEBUG] RESPONSE | 03 41 05 9F AA AA AA AA
 COOLANT_TEMP: 119 °C
 ```
-
-
----
-𝑻𝒐-𝒅𝒐 𝒏𝒆𝒙𝒕:
----
+## To-do next
 - Multiframe request for getting VIN and DTC fault code
