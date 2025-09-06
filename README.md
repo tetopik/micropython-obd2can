@@ -4,7 +4,7 @@ Made possible thanks to Viktor's [micropython-esp32-twai](https://github.com/str
 
 ## How to
 Simply connect CAN tranceiver module like `TJA1050`, `SN65HVD230`, or `MCP2551` to the `can_rx` and `can_tx` pins of ESP32.\
-Then connect the module's `CAN H` and `CAN L` pins to the car's OBD2 port, usually pin 6 and 14 respectively with the common ground as well.
+Then connect the module's `CAN_H` and `CAN_L` pins to the car's OBD2 port, usually pin 6 and 14 respectively with the common ground as well.
 
 ![https://forum.arduino.cc/t/esp32-waveshare-sn65hvd230-can/1089185](https://europe1.discourse-cdn.com/arduino/original/4X/4/8/b/48b291219c72f8507d8c67aba5713d956c8bf9bf.jpeg)
 
@@ -14,7 +14,7 @@ obd.request(0x01, 0x0C) # service_id, pid_code
 ```
 ### `response`
 ```py
-memoryview(0x41, 0x0C, 0x0D, 0x98) # service_id + 0x40, pid_code, 2-MSB data for RPM
+memoryview(0x41, 0x0C, 0x0D, 0x98) # service_id + 0x40, pid_code, 2-bytes MSB-firts data for RPM
 ```
 
 ## Example code
