@@ -81,6 +81,7 @@ COOLANT_TEMP: 119 °C
 ```
 ## Miscs
 ### To-do next
+- [x] Tested on some `ISO 15765-4 CAN` compliant vehicle with 500kbaud
 - [x] Retieve all supported PIDs: `pid_code 0x00, 0x20, 0x40, ...`
 - [ ] Multiframe request for getting VIN and DTC fault code
 - [ ] Using CAN hardware filters instead of manual `if` statement:
