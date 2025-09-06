@@ -80,7 +80,7 @@ CAN: [DEBUG] RESPONSE | 03 41 05 9F AA AA AA AA
 COOLANT_TEMP: 119 °C
 ```
 ## Miscs
-### To-do next
+### To-do list
 - [x] Tested on some `ISO 15765-4 CAN` compliant vehicle with 500kbaud
 - [x] Retieve all supported PIDs: `pid_code 0x00, 0x20, 0x40, ...`
 - [ ] Multiframe request for getting VIN and DTC fault code
