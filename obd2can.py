@@ -1,10 +1,7 @@
 from time import ticks_diff, ticks_add, ticks_ms, sleep_ms
 from machine import Pin, Signal
+import CAN
 
-try:
-    import CAN
-except ImportError:
-    from CAN import CAN
 
 supported_pids: dict[str,tuple] = {
     'monitor_status': (0x01, lambda data: data, 'Bit encoded'),  # Monitor status since DTCs cleared
@@ -12,6 +9,7 @@ supported_pids: dict[str,tuple] = {
     'engine_load': (0x04, lambda data: (data[0] * 100) / 255, '%'),  # Calculated engine load
     'coolant_temp': (0x05, lambda data: data[0] - 40, '°C'),  # Engine coolant temperature
     'stft_bank1': (0x06, lambda data: (data[0] * 100 / 128) - 100, '%'),  # Short term fuel trim—Bank 1
+    'ltft_bank1': (0x07, lambda data: (data[0] * 100 / 128) - 100, '%'),  # Long term fuel trim—Bank 1
     'intake_press': (0x0B, lambda data: data[0], 'kPa'),  # Intake manifold absolute pressure
     'rpm': (0x0C, lambda data: ((data[0] << 8) + data[1]) / 4.0, 'rpm'),  # Engine speed
     'speed': (0x0D, lambda data: data[0], 'km/h'),  # Vehicle speed
@@ -20,10 +18,12 @@ supported_pids: dict[str,tuple] = {
     'maf': (0x10, lambda data: ((data[0] << 8) + data[1]) / 100.0, 'g/s'),  # Mass air flow sensor
     'throttle_pos': (0x11, lambda data: (data[0] * 100) / 255, '%'),  # Throttle position
     'o2_sensors': (0x13, lambda data: data, 'Bit encoded'),  # Oxygen sensors present
+    'o2_s1_bank1': (0x14, lambda data: ((data[0] / 200.0), (data[1] * 100 / 128) - 100 if data[1] != 0xFF else None), 'V, %'),  # O2 Sensor 1 Bank 1: Voltage, Short term fuel trim
     'o2_s2_bank1': (0x15, lambda data: ((data[0] / 200.0), (data[1] * 100 / 128) - 100 if data[1] != 0xFF else None), 'V, %'),  # Oxygen Sensor 2: Voltage, Short term fuel trim
     'run_time': (0x1F, lambda data: (data[0] << 8) + data[1], 's'),  # Run time since engine start
     'mil_dist': (0x21, lambda data: (data[0] << 8) + data[1], 'km'),  # Distance traveled with MIL on
     'evap_purge': (0x2E, lambda data: (data[0] * 100) / 255, '%'),  # Commanded evaporative purge
+    'fuel_level': (0x2F, lambda data: (data[0] * 100) / 255, '%'),  # Fuel Tank Level Input
     'warm_ups': (0x30, lambda data: data[0], 'count'),  # Warm-ups since codes cleared
     'clr_dist': (0x31, lambda data: (data[0] << 8) + data[1], 'km'),  # Distance traveled since codes cleared
     'baro_press': (0x33, lambda data: data[0], 'kPa'),  # Absolute Barometric Pressure
@@ -32,11 +32,13 @@ supported_pids: dict[str,tuple] = {
     'abs_load': (0x43, lambda data: ((data[0] << 8) + data[1]) * 100 / 255, '%'),  # Absolute load value
     'cmd_air_fuel': (0x44, lambda data: ((data[0] << 8) + data[1]) * 2 / 65536, 'ratio'),  # Commanded Air-Fuel Equivalence Ratio
     'rel_throttle': (0x45, lambda data: (data[0] * 100) / 255, '%'),  # Relative throttle position
-    'fuel_level': (0x2F, lambda data: (data[0] * 100) / 255, '%'),  # Fuel Tank Level Input
     'throttle_b': (0x47, lambda data: (data[0] * 100) / 255, '%'),  # Absolute throttle position B
     'accel_d': (0x49, lambda data: (data[0] * 100) / 255, '%'),  # Accelerator pedal position D
-    'cmd_throttle': (0x4C, lambda data: (data[0] * 100) / 255, '%')  # Commanded throttle actuator
+    'cmd_throttle': (0x4C, lambda data: (data[0] * 100) / 255, '%'),  # Commanded throttle actuator
+    'time_run_mil': (0x41, lambda data: (data[0] << 8) + data[1], 'min'),  # Time run with MIL on
+    'time_since_dtc': (0x4D, lambda data: (data[0] << 8) + data[1], 'min')  # Time since DTCs cleared
 }
+
 
 class OBD2CAN:
     def __init__(self,
@@ -151,22 +153,4 @@ class OBD2CAN:
         except Exception as e:
             self.log('ERROR decoding response:', self.to_hex(response), str(e))
             return None
-
-def main(debug: bool = False) -> None:
-    obd = OBD2CAN(20, 21, debug=debug)
-
-    try:
-        print(f'Supported PIDs: {obd.to_hex(obd.get_supported_pid())}\n')
-
-        for pid_str in ['rpm', 'speed', 'maf', 'volt_module', 'coolant_temp']:
-            val = obd.get_pid(pid_str)
-            if val is not None:
-                print(f'{pid_str.upper()}: {val} {supported_pids[pid_str][2]}\n')
-
-    except KeyboardInterrupt:
-        pass
-    finally:
-        obd.can.deinit()
-
-if __name__ == '__main__':
-    main(debug=True)
+            
