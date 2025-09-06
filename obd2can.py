@@ -69,7 +69,7 @@ class OBD2CAN:
 
         self.can = CAN(0, tx=tx, rx=rx, mode=mode, bitrate=bitrate, extframe=extframe)
         
-        # the CAN hardware filters won't work as expected at the time, so we go by software (if self._resp_id[0] > can_id > self._resp_id[1])
+        # CAN hardware filters won't work as expected at the time, so we go by software instead (if self._resp_id[0] > can_id > self._resp_id[1])
         # can.set_filters(bank=0, mode=CAN.FILTER_RAW_SINGLE, params=[resp_id, filter_mask], extframe=is_extended_id)
 
         if debug: print('\n=============================\n')
@@ -152,9 +152,8 @@ class OBD2CAN:
         if response is None:
             return None
 
-        pid_decoder = supported_pids[pid_str][1]
         try:
-            return pid_decoder(response[2:])
+            return supported_pids[pid_str][1](response[2:])
         except Exception as e:
             self.log('ERROR decoding response:', self.to_hex(response), str(e))
             return None
