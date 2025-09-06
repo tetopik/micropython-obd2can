@@ -83,6 +83,11 @@ COOLANT_TEMP: 119 °C
 ### To-do next
 - [x] Retieve all supported PIDs: `pid_code 0x00, 0x20, 0x40, ...`
 - [ ] Multiframe request for getting VIN and DTC fault code
+- [ ] Using CAN hardware filters instead of manual `if` statement:
+    ```py
+    if 0x7E8 > can_id > 0x7EF:
+        continue
+    ```
 
 ### Further readings
 - [ESP32 Two-Wire Automotive Interface (TWAI)](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/peripherals/twai.html)
