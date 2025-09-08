@@ -1,4 +1,4 @@
-from time import ticks_diff, ticks_add, ticks_ms
+from time import ticks_diff, ticks_add, ticks_ms, sleep_ms
 from machine import Pin, Signal
 import CAN
 
@@ -43,14 +43,15 @@ supported_pids: dict[str, tuple] = {
     'time_since_dtc': (0x4D, lambda data: (data[0] << 8) + data[1], 'min')  # Time since DTCs cleared
 }
 
+
 class OBD2CAN:
     def __init__(self,
                  rx: int,
                  tx: int,
-                 mode: int = 0,
+                 mode: int = CAN.NORMAL,
                  bitrate: int = 500_000,
-                 extframe: bool = True,
-                 debug: bool = True,
+                 extframe: bool = False,
+                 debug: bool = False,
                  led_pin: int = 8,
                  ) -> None:
 
@@ -68,12 +69,34 @@ class OBD2CAN:
             self._filter_mask: int = 0x1FFFFFF0  # 1 1111 1111 1111 1111 1111 1111 0000
 
         self.can = CAN(0, tx=tx, rx=rx, mode=mode, bitrate=bitrate, extframe=extframe)
-        
+
         # CAN hardware filters won't work as expected at the time, so we go by software instead (if self._resp_id[0] > can_id > self._resp_id[1])
         # can.set_filters(bank=0, mode=CAN.FILTER_RAW_SINGLE, params=[resp_id, filter_mask], extframe=is_extended_id)
 
-        if debug: print('\n=============================\n')
+        print(f'\n{' CAN0 UP ':-^29}\n')
         self.led.off()
+
+    def auto_extframe(self):
+        _debug = self.debug
+        self.debug = True
+        self.log('Running scan for valid extframe ...')
+
+        result = [False, False]
+        for i in range(2):
+            self.extframe = bool(i)
+            response = self.request(0x01, 0x00)
+            result[i] = bool(response is not None)
+        self.log(f'Scan done > (not_ext:{int(result[0])} | (is_ext:{int(result[1])})')
+        if not result[1]:
+            self.extframe = False
+        self.log(f'Set extframe to ({self.extframe})\n')
+        self.debug = _debug
+
+    def deinit(self):
+        self.can.deinit()
+        if self.led.value():
+            self.led.off()
+        print(f'\n{' CAN0 DOWN ':-^29}\n')
 
     def log(self, *msg: str) -> None:
         if self.debug:
@@ -83,26 +106,38 @@ class OBD2CAN:
     def to_hex(data):
         return ' '.join(f'{x:02X}' for x in data)
 
-    def request(self, *args: int, timeout_ms: int = 500) -> memoryview | None:
-        msg = bytes([len(args)] + list(args) + [0xCC] * (7 - len(args)))
-
-        try:
+    def send(self, *payload: int, retries: int = 3) -> bool:
+        msg: bytes = bytes(list(payload) + [0xCC] * (8 - len(payload)))
+        success: bool = False
+        while not success:
             self.led.on()
-            self.can.send(list(msg), self._reqs_id, timeout=0, rtr=False, extframe=self.extframe)
-            self.log('REQUEST  |', self.to_hex(msg))
-        except Exception as e:
-            self.log('ERROR sending request:', self.to_hex(msg), str(e))
-            return None
-        finally:
-            self.led.off()
+            try:
+                self.can.send(list(msg), self._reqs_id, rtr=False, extframe=self.extframe)
+                self.log('REQUEST  >>', self.to_hex(msg))
+                success = True
+            except Exception as e:
+                if retries > 1:
+                    retries -= 1
+                    self.led.off()
+                    sleep_ms(50)
+                else:
+                    self.log('ERROR sending request:', self.to_hex(msg), str(e))
+                    break
+        self.led.off()
+        return success
 
+    def request(self, *payload: int, timeout_ms: int = 500) -> memoryview | None:
+        if not self.send(len(payload), *payload):
+            return None
+
+        multiframe_seq: int = 0
         rx_timeout = ticks_add(ticks_ms(), timeout_ms)
         while ticks_diff(rx_timeout, ticks_ms()) > 0:
             if not self.can.any():
                 continue
 
             self.led.on()
-            can_id, is_ext, is_rtr, data = self.can.recv(timeout=0)
+            can_id, is_ext, is_rtr, data = self.can.recv()
             self.led.off()
 
             if is_rtr or (is_ext != self.extframe):
@@ -111,17 +146,54 @@ class OBD2CAN:
                 continue
 
             data_mv = memoryview(data)
-            if 3 >= data_mv[0] >= 7:
-                continue
-            if data_mv[1] != 0x41:
-                continue
-            if data_mv[2] != args[1]:
-                continue
+            pci = data_mv[0] >> 4
+            if multiframe_seq: # wait for consecutive frame (CF)
+                if pci != 2:
+                    continue
+                seq = data_mv[0] & 0x0F
+                if seq != multiframe_seq:
+                    continue
+                self.log('RESPONSE <<', self.to_hex(data_mv))
+                multiframe_seq = (multiframe_seq + 1) & 0x0F # wrap at 15
+                multiframe_buf.extend(data_mv[1:])
+                if len(multiframe_buf) < multiframe_len:
+                    rx_timeout = ticks_add(ticks_ms(), timeout_ms)
+                    continue
+                return memoryview(multiframe_buf[:multiframe_len])
 
-            self.log('RESPONSE |', self.to_hex(data_mv))
-            return data_mv[1: data_mv[0] + 1]
+            elif pci == 0: # single frame (SF)
+                if len(payload) >= data_mv[0] >= 8:
+                    continue
+                if data_mv[1] != (payload[0] + 0x40): # response service_id
+                    continue
+                try:
+                    if data_mv[2] != payload[1]: # pid_code
+                        continue
+                except IndexError:
+                    pass
+                self.log('RESPONSE <<', self.to_hex(data_mv))
+                return data_mv[1:1 + data_mv[0]]
 
-        self.log(f'ERROR PID {args[1]:02X} request timeout.')
+            elif pci == 1: # first frame (FF)
+                multiframe_len = ((data_mv[0] & 0x0F) << 8) | data_mv[1]
+                multiframe_buf = bytearray()
+                multiframe_seq = 1
+                if multiframe_len <= 7:
+                    continue
+                if data_mv[2] != (payload[0] + 0x40): # response service_id
+                    continue
+                try:
+                    if data_mv[3] != payload[1]: # pid_code
+                        continue
+                except IndexError:
+                    pass
+                self.log('RESPONSE <<', self.to_hex(data_mv))
+                multiframe_buf.extend(data_mv[2:])
+                if not self.send(0x30, 0x00, 0x00): # flow control
+                    return None
+                rx_timeout = ticks_add(ticks_ms(), timeout_ms)
+
+        self.log(f'RESPONSE << {'TIMEOUT':-^23}')
         return None
 
     def get_supported_pid(self) -> bytearray:
@@ -143,17 +215,79 @@ class OBD2CAN:
                 break
         return result
 
+    def get_dtcs(self) -> list[bytes]:
+        response = self.request(0x03)
+        if response is None:
+            self.log('ERROR no response for DTCs package.')
+            return []
+
+        dtc_bytes = bytes(response[2:])
+        if len(dtc_bytes) % 2 != 0:
+            self.log("ERROR: DTC bytes is not in pairs (2 bytes per code)")
+            return []
+
+        base_map = ['P', 'C', 'B', 'U']
+        codes = []
+        for i in range(0, len(dtc_bytes), 2):
+            a, b = dtc_bytes[i], dtc_bytes[i+1]
+            codes.append(f'{base_map[a >> 6]}{(a >> 4) & 3}{a & 0xF}{b >> 4}{b & 0xF}'.encode('ascii'))
+        return codes
+
+    def get_vin(self) -> str:
+        response = self.request(0x09, 0x02)
+        if response is None:
+            self.log('ERROR no response for VIN package.')
+            return ''
+
+        # response: service_id 0x09, pid_code 0x02, nodi(1), vin(17)
+        vin = bytes(response[3:])
+        if len(vin) != 17: # standard VIN length
+            self.log(f"ERROR invalid VIN length: {len(vin)} ({self.to_hex(vin)})")
+            return ''
+
+        try:
+            return vin.decode('ascii')
+        except UnicodeDecodeError:
+            self.log(f"ERROR decoding VIN package ({self.to_hex(vin)})")
+            return ''
+
     def get_pid(self, pid_str: str) -> float | int | None:
         if pid_str not in supported_pids:
-            self.log(f'ERROR request PID key {pid_str} not supported.')
+            self.log(f'ERROR PID key {pid_str} not supported.')
             return None
 
-        response = self.request(0x01, supported_pids[pid_str][0])
+        response = self.request(0x01, supported_pids[pid_str][0]) # service_id, pid_code
         if response is None:
+            self.log(f'ERROR no response for PID {pid_str.upper()}.')
             return None
 
         try:
-            return supported_pids[pid_str][1](response[2:])
+            return supported_pids[pid_str][1](response[2:]) # pid sepecific lambda function call
         except Exception as e:
             self.log('ERROR decoding response:', self.to_hex(response), str(e))
             return None
+
+
+# ============= EXAMPLE MAIN CODE =============== #
+
+def main() -> None:
+    obd = OBD2CAN(rx=20, tx=21, extframe=True, debug=True)
+
+    try:
+        print(f'VIN: {obd.get_vin()}\n')
+        print(f'DTC: {obd.get_dtcs()}\n')
+        print(f'PID: {obd.to_hex(obd.get_supported_pid())}\n')
+
+        for pid_str in ['rpm', 'speed', 'maf', 'volt_module', 'coolant_temp']:
+            val = obd.get_pid(pid_str)
+            if val is not None:
+                print(f'{pid_str.upper()}: {val} {supported_pids[pid_str][2]}\n')
+
+    except KeyboardInterrupt:
+        pass
+    finally:
+        obd.deinit()
+
+if __name__ == '__main__':
+    main()
+    
