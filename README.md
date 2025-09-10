@@ -1,46 +1,96 @@
+### Disclaimer
+> [!CAUTION]
+> Working with a vehicle’s CAN bus involves risks, including possible damage to the vehicle’s electronics and safety systems. Proceed entirely at your own risk!
+
+
 # micropython-obd2can
-A micropython class to retrieve car's PID live parameter using ESP32 native TWAI/CAN peripheral.\
+
+- The `OBD2CAN` library is a lightweight MicroPython library to communicate with vehicle ECUs over **OBD-II CAN bus** using ESP32 native TWAI/CAN peripheral.
+- Supports reading **PIDs**, **VIN**, and **DTCs**, with both 11-bit (standard) and 29-bit (extended) CAN IDs.  
+- Handles **multi-frame ISO-TP responses**.
+- The library supports both standard and extended CAN frame formats and includes debug logging for troubleshooting.
+
 Made possible thanks to Viktor's [micropython-esp32-twai](https://github.com/straga/micropython-esp32-twai).
 
-## How to
+## Features
+- Query supported OBD-II Parameter IDs (PIDs)
+- Retrieve Diagnostic Trouble Codes (DTCs)
+- Fetch Vehicle Identification Number (VIN)
+- Access real-time vehicle data (e.g., RPM, speed, coolant temperature)
+- Support for standard (11-bit) and extended (29-bit) CAN identifiers
+- LED status indication and debug logging
+
+## Installation
+1. Ensure you have a MicroPython-compatible microcontroller with CAN bus support.
+2. Copy the `obd2can.py` file to your microcontroller's filesystem: `ampy put obd2can.py`.
+3. Ensure the `CAN` module (a custom CAN bus driver) is available on your device.
+4. Install required MicroPython libraries: `machine` and `time`.
+
+## Dependencies
+- `machine` (for Pin and Signal handling)
+- `time` (for timing functions like `ticks_ms`, `ticks_add`, `ticks_diff`, `sleep_ms`)
+- `CAN` (custom module for CAN bus communication)
+
+## Usage
+Below is an example of how to use the OBD2CAN class to retrieve vehicle data:
+
 Simply connect CAN tranceiver module like `TJA1050`, `SN65HVD230`, or `MCP2551` to the `can_rx` and `can_tx` pins of ESP32.\
 Then connect the module's `CAN_H` and `CAN_L` pins to the car's OBD2 port, usually pin 6 and 14 respectively with the common ground as well.
 
 ![https://forum.arduino.cc/t/esp32-waveshare-sn65hvd230-can/1089185](https://europe1.discourse-cdn.com/arduino/original/4X/4/8/b/48b291219c72f8507d8c67aba5713d956c8bf9bf.jpeg)
 
-### Pseudo ELM237 serial `request` for RPM `0x0C`
-```py
-obd.request(0x01, 0x0C) # service_id, pid_code
-```
-### `response`
-```py
-memoryview(0x41, 0x0C, 0x0D, 0x98) # service_id + 0x40, pid_code, 2-bytes MSB-firts data for RPM
-```
+### VIN Request
+    ```
+    Request: 09 02
+    Response: 49 02 01 57 50 30 5A 5A 5A 39 39 39 39 39 39 39 39 39
+    VIN: WP0ZZZ99999999999
+    ```
+### DTCs Request
+    ```
+    Request: 03
+    Response: 43 02 01 43 91 92
+    Decoded: ['P0143', 'B1192']
+    ```
 
-## Example code
-### `main.py`
+### RPM Request
+    ```
+    Request: 01 0C
+    Response: 41 0C 1A F8
+    Decoded: ((0x1A << 8) + 0xF8) / 4 = 1726 rpm
+    ```
+    
+### Example code
 ```py
-from obd2can import OBD2CAN, supported_pids
+from obd2can import OBD2CAN
 
-def main() -> None:
+def main():
+    # Initialize OBD2CAN with RX pin 20, TX pin 21, extended frame, and debug mode
     obd = OBD2CAN(rx=20, tx=21, extframe=True, debug=True)
-
     try:
-        print(f'VIN: {obd.get_vin()}\n')
-        print(f'DTC: {obd.get_dtcs()}\n')
-        print(f'PID: {obd.to_hex(obd.get_supported_pid())}\n')
+        # Get VIN
+        vin = obd.get_vin()
+        print('VIN:', vin.decode())
 
-        for pid_str in ['rpm', 'speed', 'maf', 'volt_module', 'coolant_temp']:
-            val = obd.get_pid(pid_str)
+        # Get DTCs
+        dtcs = obd.get_dtcs()
+        print('DTC:', ' '.join(dtc.decode() for dtc in dtcs))
+
+        # Get supported PIDs
+        supported_pids = obd.get_supported_pid()
+        print('PID:', obd.to_hex(supported_pids))
+
+        # Query specific PIDs
+        for pid in ['rpm', 'speed', 'maf', 'volt_module', 'coolant_temp']:
+            val = obd.get_pid(pid)
             if val is not None:
-                print(f'{pid_str.upper()}: {val} {supported_pids[pid_str][2]}\n')
-
-    except KeyboardInterrupt:
-        pass
+                print(f'{pid.upper()}: {val} {obd2can.supported_pids[pid][2]}')
     finally:
         obd.deinit()
+
+if __name__ == '__main__':
+    main()
 ```
-### `console`
+### `Console`
 ```
 CAN: TIMING
 CAN: timing brp=0
@@ -99,6 +149,96 @@ COOLANT_TEMP: 105 °C
 
 --------- CAN0 DOWN ---------
 ```
+
+## Methods
+```py
+__init__(rx, tx, mode=CAN.NORMAL, bitrate=500_000, extframe=False, debug=False, led_pin=8)
+```
+Initializes the OBD2CAN interface.
+- Parameters:
+    - `rx (int)`: CAN receive pin number.
+    - `tx (int)`: CAN transmit pin number.
+    - `mode (int)`: CAN bus mode (e.g., CAN.NORMAL). Defaults to CAN.NORMAL.
+    - `bitrate (int)`: CAN bus bitrate in bits per second. Defaults to 500000.
+    - `extframe (bool)`: Use extended frame format if True. Defaults to False.
+    - `debug (bool)`: Enable debug logging if True. Defaults to False.
+    - `led_pin (int)`: Pin number for status LED. Defaults to 8.
+
+
+```py
+deinit()
+```
+Deinitializes the `CAN` bus and turns off the status LED.
+
+
+```py
+log(*msg)
+```
+Logs debug messages if debug mode is enabled.
+- Parameters:
+    `*msg`: Variable number of message strings to log.
+
+
+```py
+to_hex(data)
+```
+Converts data to a hexadecimal string representation.
+- Parameters:
+    `data`: Data to convert (`bytes` or list of `integers`).\
+Returns: Space-separated hexadecimal string.
+
+
+```py
+send(*payload, retries=3)
+```
+Sends a `CAN` message with the specified payload.
+- Parameters:
+    - `*payload`: Variable number of `integers` to send as payload.
+    - `retries (int)`: Number of retry attempts. Defaults to `3`.
+Returns: `True` if the message was sent successfully, `False` otherwise.
+
+
+```py
+request(*payload, timeout_ms=500)
+```
+Sends an OBD-II request and waits for a response.
+- Parameters:
+    - `*payload`: Variable number of integers representing the request payload.
+    - `timeout_ms (int)`: Response timeout in `milliseconds`. Defaults to `500`.
+Returns: Response data as a `memoryview`, or `None` if no valid response.
+
+
+```py
+get_supported_pid()
+```
+Retrieves the list of supported OBD-II Parameter IDs (PIDs).\
+Returns: A `bytes` object containing the supported PID codes.
+
+
+```py
+get_dtcs()
+```
+Retrieves Diagnostic Trouble Codes (DTCs) from the vehicle.\
+Returns: A list of DTCs encoded as `ASCII strings`.
+
+
+```py
+get_vin()
+```
+Retrieves the Vehicle Identification Number (VIN).\
+Returns: The VIN as a `bytes` object, or empty `bytes` if invalid.
+
+
+```py
+get_pid(pid_str, freeze_frame=False)
+```
+Retrieves the value of a specific OBD-II Parameter ID (PID).
+- Parameters:
+    - `pid_str (str)`: The PID key (e.g., `'rpm'`, `'speed'`).
+    - `freeze_frame (bool)`: If True, query freeze frame data. Defaults to `False`.
+Returns: The decoded PID value (`float` or `int`), or `None` if the request fails.
+
+
 ## Miscs
 ### To-do list
 - [x] Tested on some `ISO 15765-4 CAN` compliant vehicle with 500kbaud
@@ -115,6 +255,8 @@ COOLANT_TEMP: 105 °C
 - [Wiki OBD-II PIDs](https://en.wikipedia.org/wiki/OBD-II_PIDs)
 - [OBD2 Explained](https://www.csselectronics.com/pages/obd2-explained-simple-intro)
 
-### Disclaimer
-> [!CAUTION]
-> Working with a vehicle’s CAN bus involves risks, including possible damage to the vehicle’s electronics and safety systems. Proceed entirely at your own risk!
+### Contributing
+Contributions are welcome! Please submit pull requests or open issues on the GitHub repository.
+
+### License
+This project is licensed under the MIT License.
