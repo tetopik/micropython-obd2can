@@ -25,13 +25,10 @@ Made possible thanks to Viktor's [micropython-esp32-twai](https://github.com/str
 ## Installation
 1. Ensure you have a MicroPython-compatible microcontroller with CAN bus support.
 2. Copy the `obd2can.py` file to your microcontroller's filesystem: `ampy put obd2can.py`.
-3. Ensure the `CAN` module (a custom CAN bus driver) is available on your device.
-4. Install required MicroPython libraries: `machine` and `time`.
+3. Ensure the `CAN` module (a CAN bus native driver) is available on your device.
 
 ## Dependencies
-- `machine` (for Pin and Signal handling)
-- `time` (for timing functions like `ticks_ms`, `ticks_add`, `ticks_diff`, `sleep_ms`)
-- `CAN` (custom module for CAN bus communication)
+- [micropython-esp32-twai](https://github.com/straga/micropython-esp32-twai)
 
 ## Usage
 Simply connect CAN tranceiver module like `TJA1050`, `SN65HVD230`, or `MCP2551` to the `can_rx` and `can_tx` pins of ESP32.\
