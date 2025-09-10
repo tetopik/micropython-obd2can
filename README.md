@@ -1,7 +1,7 @@
 ### Disclaimer
 > [!CAUTION]
 > Working with a vehicle’s CAN bus involves risks, including possible damage to the vehicle’s electronics and safety systems. Proceed entirely at your own risk!
-
+---
 
 # micropython-obd2can
 
@@ -11,6 +11,8 @@
 - The library supports both standard and extended CAN frame formats and includes debug logging for troubleshooting.
 
 Made possible thanks to Viktor's [micropython-esp32-twai](https://github.com/straga/micropython-esp32-twai).
+
+---
 
 ## Features
 - Query supported OBD-II Parameter IDs (PIDs)
@@ -40,24 +42,19 @@ Then connect the module's `CAN_H` and `CAN_L` pins to the car's OBD2 port, usual
 ![https://forum.arduino.cc/t/esp32-waveshare-sn65hvd230-can/1089185](https://europe1.discourse-cdn.com/arduino/original/4X/4/8/b/48b291219c72f8507d8c67aba5713d956c8bf9bf.jpeg)
 
 ### VIN Request
-    ```
     Request: 09 02
     Response: 49 02 01 57 50 30 5A 5A 5A 39 39 39 39 39 39 39 39 39
     VIN: WP0ZZZ99999999999
-    ```
+
 ### DTCs Request
-    ```
     Request: 03
     Response: 43 02 01 43 91 92
     Decoded: ['P0143', 'B1192']
-    ```
 
 ### RPM Request
-    ```
     Request: 01 0C
     Response: 41 0C 1A F8
     Decoded: ((0x1A << 8) + 0xF8) / 4 = 1726 rpm
-    ```
     
 ### Example code
 ```py
@@ -255,8 +252,10 @@ Returns: The decoded PID value (`float` or `int`), or `None` if the request fail
 - [Wiki OBD-II PIDs](https://en.wikipedia.org/wiki/OBD-II_PIDs)
 - [OBD2 Explained](https://www.csselectronics.com/pages/obd2-explained-simple-intro)
 
-### Contributing
+---
+
+## Contributing
 Contributions are welcome! Please submit pull requests or open issues on the GitHub repository.
 
-### License
+## License
 This project is licensed under the MIT License.
