@@ -5,7 +5,7 @@
 
 # micropython-obd2can
 
-- The `OBD2CAN` library is a lightweight MicroPython library to communicate with vehicle ECUs over **OBD-II CAN bus** using ESP32 native TWAI/CAN peripheral.
+A lightweight MicroPython library to communicate with vehicle ECUs over **OBD-II CAN bus** using ESP32 native TWAI/CAN peripheral.
 - Supports reading **PIDs**, **VIN**, and **DTCs**, with both 11-bit (standard) and 29-bit (extended) CAN IDs.  
 - Handles **multi-frame ISO-TP responses**.
 - The library supports both standard and extended CAN frame formats and includes debug logging for troubleshooting.
@@ -34,8 +34,6 @@ Made possible thanks to Viktor's [micropython-esp32-twai](https://github.com/str
 - `CAN` (custom module for CAN bus communication)
 
 ## Usage
-Below is an example of how to use the OBD2CAN class to retrieve vehicle data:
-
 Simply connect CAN tranceiver module like `TJA1050`, `SN65HVD230`, or `MCP2551` to the `can_rx` and `can_tx` pins of ESP32.\
 Then connect the module's `CAN_H` and `CAN_L` pins to the car's OBD2 port, usually pin 6 and 14 respectively with the common ground as well.
 
