@@ -1,8 +1,28 @@
+"""
+OBD2CAN MicroPython Library
+===========================
+
+This module provides an interface for querying OBD-II data
+over CAN bus using MicroPython. It supports single-frame and
+multi-frame ISO-TP responses, and can read PIDs, VIN, and
+diagnostic trouble codes (DTCs).
+
+Author: Taufiq
+License: MIT
+"""
+
+
 from time import ticks_diff, ticks_add, ticks_ms, sleep_ms
 from machine import Pin, Signal
-import CAN
+
+try:
+    import CAN
+except ImportError:
+    from CAN import CAN
 
 
+#: Dictionary of supported PIDs mapped to
+#: (PID code, decode function, unit string).
 supported_pids: dict[str, tuple] = {
     'monitor_status': (0x01, lambda data: data, 'Bit encoded'),  # Monitor status since DTCs cleared
     'fuel_status': (0x03, lambda data: data, 'Bit encoded'),  # Fuel system status
@@ -45,6 +65,25 @@ supported_pids: dict[str, tuple] = {
 
 
 class OBD2CAN:
+    """
+    OBD-II over CAN bus interface.
+
+    Provides methods to:
+      • Query PIDs (live data, freeze frame).
+      • Read Diagnostic Trouble Codes (DTCs).
+      • Get Vehicle Identification Number (VIN).
+      • Handle ISO-TP multi-frame responses.
+
+    Args:
+        rx (int): GPIO pin for CAN RX.
+        tx (int): GPIO pin for CAN TX.
+        mode (int): CAN mode (default CAN.NORMAL).
+        bitrate (int): CAN bitrate (default 500000).
+        extframe (bool): Use extended (29-bit) identifiers.
+        debug (bool): Print debug logs.
+        led_pin (int): LED indicator GPIO pin.
+    """
+    
     def __init__(self,
                  rx: int,
                  tx: int,
@@ -54,7 +93,8 @@ class OBD2CAN:
                  debug: bool = False,
                  led_pin: int = 8,
                  ) -> None:
-
+        """Initialize CAN interface and OBD-II settings."""
+                     
         self.led = Signal(Pin(led_pin, Pin.OUT, value=0), invert=True)
         self.debug = debug
         self.extframe = extframe
@@ -62,11 +102,11 @@ class OBD2CAN:
         if not extframe:
             self._reqs_id: int = 0x7DF
             self._resp_id: tuple[int, int] = (0x7E8, 0x7EF)  # 111 1110 1XXX
-            self._filter_mask: int = 0x7F8  # 111 1111 1000
+            self._filter_mask: int = 0x7F8                   # 111 1111 1000
         else:
             self._reqs_id: int = 0x18DB33F1
             self._resp_id: tuple[int, int] = (0x18DAF110, 0x18DAF11F)  # 1 1000 1101 1010 1111 0001 0001 XXXX
-            self._filter_mask: int = 0x1FFFFFF0  # 1 1111 1111 1111 1111 1111 1111 0000
+            self._filter_mask: int = 0x1FFFFFF0                        # 1 1111 1111 1111 1111 1111 1111 0000
 
         self.can = CAN(0, tx=tx, rx=rx, mode=mode, bitrate=bitrate, extframe=extframe)
 
@@ -76,37 +116,34 @@ class OBD2CAN:
         print(f'\n{' CAN0 UP ':-^29}\n')
         self.led.off()
 
-    def auto_extframe(self):
-        _debug = self.debug
-        self.debug = True
-        self.log('Running scan for valid extframe ...')
-
-        result = [False, False]
-        for i in range(2):
-            self.extframe = bool(i)
-            response = self.request(0x01, 0x00)
-            result[i] = bool(response is not None)
-        self.log(f'Scan done > (not_ext:{int(result[0])} | (is_ext:{int(result[1])})')
-        if not result[1]:
-            self.extframe = False
-        self.log(f'Set extframe to ({self.extframe})\n')
-        self.debug = _debug
-
     def deinit(self):
+        """Shut down CAN interface and turn off LED."""
         self.can.deinit()
         if self.led.value():
             self.led.off()
         print(f'\n{' CAN0 DOWN ':-^29}\n')
 
     def log(self, *msg: str) -> None:
-        if self.debug:
+        """Print debug messages if debug mode is enabled."""
+       if self.debug:
             print('CAN: [DEBUG]', *msg)
 
     @staticmethod
     def to_hex(data):
+        """Convert byte sequence into hex string."""
         return ' '.join(f'{x:02X}' for x in data)
 
     def send(self, *payload: int, retries: int = 3) -> bool:
+        """
+        Send a CAN frame with padding.
+
+        Args:
+            payload: Variable length data to send.
+            retries (int): Retry attempts if sending fails.
+
+        Returns:
+            bool: True if send succeeded, False otherwise.
+        """
         msg: bytes = bytes(list(payload) + [0xCC] * (8 - len(payload)))
         success: bool = False
         while not success:
@@ -127,6 +164,16 @@ class OBD2CAN:
         return success
 
     def request(self, *payload: int, timeout_ms: int = 500) -> memoryview | None:
+        """
+        Send a request and wait for response.
+
+        Args:
+            payload: Service ID and optional PID code.
+            timeout_ms (int): Response timeout in milliseconds.
+
+        Returns:
+            memoryview | None: Response payload, or None on timeout/error.
+        """
         if not self.send(len(payload), *payload):
             return None
 
@@ -196,7 +243,13 @@ class OBD2CAN:
         self.log(f'RESPONSE << {'TIMEOUT':-^23}')
         return None
 
-    def get_supported_pid(self) -> bytearray:
+    def get_supported_pid(self) -> bytes:
+        """
+        Get all supported PIDs from the ECU.
+
+        Returns:
+            bytes: List of supported PID codes.
+        """
         result = bytearray()
         pid_code: int = 0x00
 
@@ -213,9 +266,15 @@ class OBD2CAN:
                 pid_code += 0x20
             else:
                 break
-        return result
+        return bytes(result)
 
     def get_dtcs(self) -> list[bytes]:
+        """
+        Get Diagnostic Trouble Codes (DTCs).
+
+        Returns:
+            list[bytes]: List of 5-character ASCII codes (e.g. b'P0143').
+        """
         response = self.request(0x03)
         if response is None:
             self.log('ERROR no response for DTCs package.')
@@ -233,30 +292,46 @@ class OBD2CAN:
             codes.append(f'{base_map[a >> 6]}{(a >> 4) & 3}{a & 0xF}{b >> 4}{b & 0xF}'.encode('ascii'))
         return codes
 
-    def get_vin(self) -> str:
+    def get_vin(self) -> bytes:
+        """
+        Get the Vehicle Identification Number (VIN).
+
+        Returns:
+            bytes: VIN (17 bytes) or empty bytes on error.
+        """
         response = self.request(0x09, 0x02)
         if response is None:
             self.log('ERROR no response for VIN package.')
-            return ''
+            return b''
 
         # response: service_id 0x09, pid_code 0x02, nodi(1), vin(17)
         vin = bytes(response[3:])
         if len(vin) != 17: # standard VIN length
             self.log(f"ERROR invalid VIN length: {len(vin)} ({self.to_hex(vin)})")
-            return ''
+            return b''
 
         try:
-            return vin.decode('ascii')
+            return vin
         except UnicodeDecodeError:
             self.log(f"ERROR decoding VIN package ({self.to_hex(vin)})")
-            return ''
+            return b''
 
-    def get_pid(self, pid_str: str) -> float | int | None:
+    def get_pid(self, pid_str: str, freeze_frame: bool = False) -> float | int | None:
+        """
+        Get decoded PID value by name.
+
+        Args:
+            pid_str (str): PID key from supported_pids.
+            freeze_frame (bool): If True, read freeze-frame data.
+
+        Returns:
+            float | int | None: Decoded value or None if unavailable.
+        """
         if pid_str not in supported_pids:
             self.log(f'ERROR PID key {pid_str} not supported.')
             return None
 
-        response = self.request(0x01, supported_pids[pid_str][0]) # service_id, pid_code
+        response = self.request(0x02 if freeze_frame else 0x01, supported_pids[pid_str][0]) # service_id, pid_code
         if response is None:
             self.log(f'ERROR no response for PID {pid_str.upper()}.')
             return None
@@ -274,9 +349,14 @@ def main() -> None:
     obd = OBD2CAN(rx=20, tx=21, extframe=True, debug=True)
 
     try:
-        print(f'VIN: {obd.get_vin()}\n')
-        print(f'DTC: {obd.get_dtcs()}\n')
-        print(f'PID: {obd.to_hex(obd.get_supported_pid())}\n')
+        vin = obd.get_vin()
+        print('VIN:', vin.decode())
+
+        dtcs = obd.get_dtcs()
+        print('DTC:', ' '.join(dtc.decode() for dtc in dtcs))
+        
+        supported_pid = obd.get_supported_pid()
+        print('PID:', obd.to_hex(supported_pid))
 
         for pid_str in ['rpm', 'speed', 'maf', 'volt_module', 'coolant_temp']:
             val = obd.get_pid(pid_str)
