@@ -125,7 +125,7 @@ class OBD2CAN:
 
     def log(self, *msg: str) -> None:
         """Print debug messages if debug mode is enabled."""
-       if self.debug:
+        if self.debug:
             print('CAN: [DEBUG]', *msg)
 
     @staticmethod
@@ -149,6 +149,7 @@ class OBD2CAN:
         while not success:
             self.led.on()
             try:
+                self.can.clear_rx_queue()
                 self.can.send(list(msg), self._reqs_id, rtr=False, extframe=self.extframe)
                 self.log('REQUEST  >>', self.to_hex(msg))
                 success = True
@@ -163,7 +164,7 @@ class OBD2CAN:
         self.led.off()
         return success
 
-    def request(self, *payload: int, timeout_ms: int = 500) -> memoryview | None:
+    def request(self, *payload: int, timeout_ms: int = 1000) -> memoryview | None:
         """
         Send a request and wait for response.
 
@@ -183,16 +184,16 @@ class OBD2CAN:
             if not self.can.any():
                 continue
 
-            self.led.on()
             can_id, is_ext, is_rtr, data = self.can.recv()
-            self.led.off()
-
-            if is_rtr or (is_ext != self.extframe):
-                continue
             if self._resp_id[0] > can_id > self._resp_id[1]:
                 continue
+            if is_rtr or (is_ext != self.extframe):
+                continue
 
+            self.led.on()
             data_mv = memoryview(data)
+            self.led.off()
+
             pci = data_mv[0] >> 4
             if multiframe_seq: # wait for consecutive frame (CF)
                 if pci != 2:
