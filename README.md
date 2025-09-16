@@ -73,7 +73,7 @@ def main():
         print(f'PID: {obd.to_hex(supported_pid)}\n')
 
         # Query all known PIDs
-        for pid in supported_pids:
+        for pid_str in supported_pids:
             val = obd.get_pid(pid_str)
             if val is not None:
                 if isinstance(val, memoryview): val = obd.to_hex(val)
