@@ -57,25 +57,38 @@ from obd2can import OBD2CAN
 
 def main():
     # Initialize OBD2CAN with RX pin 20, TX pin 21, extended frame, and debug mode
-    obd = OBD2CAN(rx=20, tx=21, extframe=True, debug=True)
+    obd = OBD2CAN(rx=20, tx=21, extframe=False, debug=True, led_pin=8)
+
     try:
         # Get VIN
         vin = obd.get_vin()
-        print('VIN:', vin.decode())
+        print(f'VIN: {vin.decode()}\n')
 
         # Get DTCs
         dtcs = obd.get_dtcs()
-        print('DTC:', ' '.join(dtc.decode() for dtc in dtcs))
+        print(f'DTC: {' '.join(dtc.decode() for dtc in dtcs)}\n')
 
         # Get supported PIDs
         supported_pids = obd.get_supported_pid()
-        print('PID:', obd.to_hex(supported_pids))
+        print(f'PID: {obd.to_hex(supported_pid)}\n')
 
-        # Query specific PIDs
-        for pid in ['rpm', 'speed', 'maf', 'volt_module', 'coolant_temp']:
-            val = obd.get_pid(pid)
+        # Query all known PIDs
+        for pid in supported_pids:
+            val = obd.get_pid(pid_str)
             if val is not None:
-                print(f'{pid.upper()}: {val} {obd2can.supported_pids[pid][2]}')
+                if isinstance(val, memoryview): val = obd.to_hex(val)
+                print(f'{pid_str.upper()}: {val} {supported_pids[pid_str][2]}\n')
+
+        # Live streaming some important PIDs
+        obd.debug = False
+        while True:
+            print(
+                int(obd.get_pid('coolant_temp')), 'C |',
+                round(obd.get_pid('volt_module'), 1), 'V |',
+                int(obd.get_pid('rpm')), 'RPM',
+                end='\r')
+            sleep_ms(100)
+
     finally:
         obd.deinit()
 
@@ -252,7 +265,7 @@ COOLANT_TEMP: 68 °C
 
 ## Methods
 ```py
-__init__(rx, tx, mode=CAN.NORMAL, bitrate=500_000, extframe=False, debug=False, led_pin=8)
+__init__(rx, tx, mode=CAN.NORMAL, bitrate=500_000, extframe=False, debug=False, led_pin=-1)
 ```
 Initializes the OBD2CAN interface.
 - Parameters:
@@ -309,7 +322,7 @@ Returns: Response data as a `memoryview`, or `None` if no valid response.
 
 
 ```py
-get_supported_pid()
+get_supported_pid(vehicle=False)
 ```
 Retrieves the list of supported OBD-II Parameter IDs (PIDs).
 - Parameters:
@@ -318,7 +331,7 @@ Returns: A `bytes` object containing the supported PID codes.
 
 
 ```py
-get_dtcs()
+get_dtcs(clear=False)
 ```
 Retrieves Diagnostic Trouble Codes (DTCs) from the vehicle.
 - Parameters:
@@ -348,7 +361,7 @@ Returns: The decoded PID value (`float` or `int`), or `None` if the request fail
 - [x] Tested on some `ISO 15765-4 CAN` compliant vehicle with 500kbaud
 - [x] Retieve all supported PIDs: `pid_code 0x00, 0x20, 0x40, ...`
 - [x] Multiframe request for getting VIN and DTC fault code
-- [x] Using CAN hardware filters instead of manual `if` statement:
+- [x] Using both CAN hardware filter and manual `if` statement:
     ```py
     if 0x7E8 > can_id > 0x7EF:
         continue
