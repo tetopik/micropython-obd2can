@@ -91,36 +91,43 @@ class OBD2CAN:
                  bitrate: int = 500_000,
                  extframe: bool = False,
                  debug: bool = False,
-                 led_pin: int = 8,
+                 led_pin: int = -1,
                  ) -> None:
         """Initialize CAN interface and OBD-II settings."""
-                     
-        self.led = Signal(Pin(led_pin, Pin.OUT, value=0), invert=True)
+        
+        self.led = None
+        if led_pin >= 0:    
+            self.led = Signal(Pin(led_pin, Pin.OUT, value=0), invert=True)
+        
         self.debug = debug
         self.extframe = extframe
 
         if not extframe:
             self._reqs_id: int = 0x7DF
-            self._resp_id: tuple[int, int] = (0x7E8, 0x7EF)  # 111 1110 1XXX
-            self._filter_mask: int = 0x7F8                   # 111 1111 1000
+            self._resp_id: tuple[int, int] = (0x7E8, 0x7EF) # 111 1110 1XXX
+            filter_mask: int = 0x7F8                        # 111 1111 1000
+            filter_params: list[int] = [self._resp_id[0] << 21, ~(filter_mask << 21) & 0xFFFFFFFF]
         else:
-            self._reqs_id: int = 0x18DB33F1
-            self._resp_id: tuple[int, int] = (0x18DAF110, 0x18DAF11F)  # 1 1000 1101 1010 1111 0001 0001 XXXX
-            self._filter_mask: int = 0x1FFFFFF0                        # 1 1111 1111 1111 1111 1111 1111 0000
+            self._reqs_id: int = 0x18DB33F1 #(0x18DA00F1, 0x18DAEFF1)
+            self._resp_id: tuple[int, int] = (0x18DAF100, 0x18DAF1EF)   # 1 1000 1101 1010 1111 0001 XXXX XXXX
+            filter_mask: int = 0x1FFFFF00                               # 1 1111 1111 1111 1111 1111 0000 0000
+            filter_params: list[int] = [self._resp_id[0] << 3, ~(filter_mask << 3) & 0xFFFFFFFF]
 
         self.can = CAN(0, tx=tx, rx=rx, mode=mode, bitrate=bitrate, extframe=extframe)
-
-        # CAN hardware filters won't work as expected at the time, so we go by software instead (if self._resp_id[0] > can_id > self._resp_id[1])
-        # can.set_filters(bank=0, mode=CAN.FILTER_RAW_SINGLE, params=[resp_id, filter_mask], extframe=is_extended_id)
+        self.can.set_filters(bank=0, mode=CAN.FILTER_RAW_SINGLE, params=filter_params, extframe=extframe)
 
         print(f'\n{' CAN0 UP ':-^29}\n')
-        self.led.off()
+        self.blink(False)
 
+    def blink(self, state: bool) -> None:
+        if isinstance(self.led, Signal):
+            self.led.value(state)
+    
     def deinit(self):
         """Shut down CAN interface and turn off LED."""
         self.can.deinit()
         if self.led.value():
-            self.led.off()
+            self.blink(False)
         print(f'\n{' CAN0 DOWN ':-^29}\n')
 
     def log(self, *msg: str) -> None:
@@ -147,7 +154,7 @@ class OBD2CAN:
         msg: bytes = bytes(list(payload) + [0xCC] * (8 - len(payload)))
         success: bool = False
         while not success:
-            self.led.on()
+            self.blink(True)
             try:
                 self.can.clear_rx_queue()
                 self.can.send(list(msg), self._reqs_id, rtr=False, extframe=self.extframe)
@@ -156,15 +163,15 @@ class OBD2CAN:
             except Exception as e:
                 if retries > 1:
                     retries -= 1
-                    self.led.off()
+                    self.blink(False)
                     sleep_ms(50)
                 else:
                     self.log('ERROR sending request:', self.to_hex(msg), str(e))
                     break
-        self.led.off()
+        self.blink(False)
         return success
 
-    def request(self, *payload: int, timeout_ms: int = 1000) -> memoryview | None:
+    def request(self, *payload: int, timeout_ms: int = 500) -> memoryview | None:
         """
         Send a request and wait for response.
 
@@ -190,9 +197,9 @@ class OBD2CAN:
             if is_rtr or (is_ext != self.extframe):
                 continue
 
-            self.led.on()
+            self.blink(True)
             data_mv = memoryview(data)
-            self.led.off()
+            self.blink(False)
 
             pci = data_mv[0] >> 4
             if multiframe_seq: # wait for consecutive frame (CF)
@@ -244,10 +251,11 @@ class OBD2CAN:
         self.log(f'RESPONSE << {'TIMEOUT':-^23}')
         return None
 
-    def get_supported_pid(self) -> bytes:
+    def get_supported_pid(self, vehicle: bool = False) -> bytes:
         """
         Get all supported PIDs from the ECU.
-
+        Args:
+            vehicle (bool): Retrieve vehicle specific PIDs instead of standard PIDs.
         Returns:
             bytes: List of supported PID codes.
         """
@@ -255,7 +263,7 @@ class OBD2CAN:
         pid_code: int = 0x00
 
         while True:
-            response = self.request(0x01, pid_code)
+            response = self.request(9 if vehicle else 1, pid_code)
             if response is None:
                 break
 
@@ -265,24 +273,38 @@ class OBD2CAN:
                     result.append(pid_code + i + 1)
             if pid_mask & 1:
                 pid_code += 0x20
+                sleep_ms(50)
             else:
                 break
         return bytes(result)
 
-    def get_dtcs(self) -> list[bytes]:
+    def get_dtcs(self, clear: bool = False) -> list[bytes]:
         """
         Get Diagnostic Trouble Codes (DTCs).
-
+        Args:
+            clear (bool): Clearing all DTC's fault codes.
         Returns:
             list[bytes]: List of 5-character ASCII codes (e.g. b'P0143').
         """
+        if clear:
+            response = self.request(0x04)
+            if response is None:
+                self.log('ERROR no response for clearing DTCs.')
+            self.log('DTC: clear command sent.')
+            sleep_ms(50)
+
         response = self.request(0x03)
         if response is None:
             self.log('ERROR no response for DTCs package.')
             return []
 
         dtc_bytes = bytes(response[2:])
-        if len(dtc_bytes) % 2 != 0:
+        dtc_bytes_num = len(dtc_bytes)
+        if dtc_bytes_num < 2:
+            if dtc_bytes_num == 1 and dtc_bytes[0] == 0:
+                self.log("DTC: No fault codes found.")
+            return []
+        elif dtc_bytes_num % 2 != 0:
             self.log("ERROR: DTC bytes is not in pairs (2 bytes per code)")
             return []
 
@@ -347,23 +369,34 @@ class OBD2CAN:
 # ============= EXAMPLE MAIN CODE =============== #
 
 def main() -> None:
-    obd = OBD2CAN(rx=20, tx=21, extframe=True, debug=True)
+    obd = OBD2CAN(rx=20, tx=21, extframe=False, debug=True, led_pin=8)
 
     try:
         vin = obd.get_vin()
-        print('VIN:', vin.decode())
+        print(f'VIN: {vin.decode()}\n')
 
         dtcs = obd.get_dtcs()
-        print('DTC:', ' '.join(dtc.decode() for dtc in dtcs))
-        
-        supported_pid = obd.get_supported_pid()
-        print('PID:', obd.to_hex(supported_pid))
+        print(f'DTC: {' '.join(dtc.decode() for dtc in dtcs)}\n')
 
-        for pid_str in ['rpm', 'speed', 'maf', 'volt_module', 'coolant_temp']:
+        supported_pid = obd.get_supported_pid()
+        print(f'PID: {obd.to_hex(supported_pid)}\n')
+
+        for pid_str in supported_pids:
             val = obd.get_pid(pid_str)
             if val is not None:
+                if isinstance(val, memoryview): val = obd.to_hex(val)
                 print(f'{pid_str.upper()}: {val} {supported_pids[pid_str][2]}\n')
-
+        
+        obd.debug = False
+        while True:
+            print(
+                int(obd.get_pid('coolant_temp')), 'C |',
+                round(obd.get_pid('volt_module'), 1), 'V |',
+                int(obd.get_pid('rpm')), 'RPM',
+                end='\r')
+            sleep_ms(100)
+            
+        
     except KeyboardInterrupt:
         pass
     finally:
